@@ -25,6 +25,25 @@ if torch.cuda.is_available():
     except Exception:
         pass
 
+def _gpu_diag():
+    import os, torch
+    try:
+        info = {
+            "torch_version": torch.__version__,
+            "torch_cuda_available": torch.cuda.is_available(),
+            "torch_cuda_version": torch.version.cuda,
+            "cudnn_available": torch.backends.cudnn.is_available(),
+            "device_count": torch.cuda.device_count(),
+            "device": ("cuda" if torch.cuda.is_available() else "cpu"),
+            "device_name_0": (torch.cuda.get_device_name(0) if torch.cuda.is_available() else None),
+            "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES"),
+        }
+        print("[gpu-diag]", info, flush=True)
+    except Exception as e:
+        print("[gpu-diag] error:", e, flush=True)
+
+_gpu_diag()
+
 # ----------------------------
 # Load model once per pod
 # ----------------------------
@@ -227,6 +246,7 @@ def generate_text(inp: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "text": gen_text,
+	"device": ("cuda" if torch.cuda.is_available() else "cpu"),
         "finish_reason": "stop",   # best-effort
         "usage": {
             "prompt_tokens": prompt_tokens,
