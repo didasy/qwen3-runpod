@@ -60,18 +60,6 @@ def _gpu_diag():
 
 _gpu_diag()
 
-def build_bad_words_ids(tok, tags):
-    # converts strings to token-id sequences for bad_words_ids
-    seqs = []
-    for t in tags:
-        ids = tok.encode(t, add_special_tokens=False)
-        if ids:
-            seqs.append(ids)
-    return seqs
-
-THINK_TAGS = ["<think>", "</think>", "<|think|>", "<|assistant_thought|>", "<|end_assistant_thought|>"]
-BAD_WORDS_IDS_THINK = build_bad_words_ids(tokenizer, THINK_TAGS)
-
 # ----------------------------
 # Load model once per pod
 # ----------------------------
@@ -92,6 +80,18 @@ model = AutoModelForCausalLM.from_pretrained(
 # pad token id fallback
 if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
     tokenizer.pad_token_id = tokenizer.eos_token_id
+
+def build_bad_words_ids(tok, tags):
+    # converts strings to token-id sequences for bad_words_ids
+    seqs = []
+    for t in tags:
+        ids = tok.encode(t, add_special_tokens=False)
+        if ids:
+            seqs.append(ids)
+    return seqs
+
+THINK_TAGS = ["<think>", "</think>", "<|think|>", "<|assistant_thought|>", "<|end_assistant_thought|>"]
+BAD_WORDS_IDS_THINK = build_bad_words_ids(tokenizer, THINK_TAGS)
 
 # ----------------------------
 # Helpers
