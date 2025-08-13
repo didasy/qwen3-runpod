@@ -36,8 +36,12 @@ RUN python -m pip install --upgrade pip && \
 # Copy worker
 COPY handler.py /app/handler.py
 
+# Optional: pre-download weights without heredoc
 ARG MODEL_ID=Qwen/Qwen3-8B
-RUN python - <<'PY'\nfrom transformers import AutoTokenizer, AutoModelForCausalLM; m=\"${MODEL_ID}\"; AutoTokenizer.from_pretrained(m, trust_remote_code=True); AutoModelForCausalLM.from_pretrained(m, trust_remote_code=True)\nPY
+RUN python -c 'import os; from transformers import AutoTokenizer, AutoModelForCausalLM; \
+m=os.environ.get("MODEL_ID","Qwen/Qwen3-8B"); \
+AutoTokenizer.from_pretrained(m, token=os.getenv("HF_TOKEN"), trust_remote_code=True); \
+AutoModelForCausalLM.from_pretrained(m, token=os.getenv("HF_TOKEN"), trust_remote_code=True)'
 
 # Start the worker
 CMD ["python", "-u", "/app/handler.py"]
