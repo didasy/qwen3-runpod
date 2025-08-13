@@ -16,9 +16,22 @@ HF_TOKEN = os.getenv("HF_TOKEN")  # set as a Secret in RunPod if needed
 DISABLE_THINKING_DEFAULT = (os.getenv("DISABLE_THINKING", "true").lower() == "true")
 FAST_TRANSLATION_DEFAULT = (os.getenv("FAST_TRANSLATION", "true").lower() == "true")
 
+def pick_dtype():
+    override = (os.getenv("MODEL_DTYPE") or "").lower()
+    if override in {"fp16","float16"}: return torch.float16
+    if override in {"bf16","bfloat16"}: return torch.bfloat16
+    if override in {"fp32","float32"}: return torch.float32
+
+    # Heuristic default: 3090 -> fp16; else bf16 if supported, else fp16
+    if torch.cuda.is_available():
+        name = torch.cuda.get_device_name(0).lower()
+        if "3090" in name: return torch.float16
+        return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    return torch.float32
+
 # dtype heuristic
-DTYPE = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) \
-    else (torch.float16 if torch.cuda.is_available() else torch.float32)
+DTYPE = pick_dtype()
+print(f"[boot] dtype={DTYPE}")
 
 # Faster matmul on GPU
 if torch.cuda.is_available():
