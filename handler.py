@@ -10,7 +10,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, StoppingCriteria, 
 # ----------------------------
 # Environment & defaults
 # ----------------------------
-MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen3-8B-Instruct")
+MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen3-8B")
 HF_TOKEN = os.getenv("HF_TOKEN")  # set as a Secret in RunPod if needed
 
 # dtype heuristic
