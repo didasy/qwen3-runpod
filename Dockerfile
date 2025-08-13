@@ -36,5 +36,8 @@ RUN python -m pip install --upgrade pip && \
 # Copy worker
 COPY handler.py /app/handler.py
 
+ARG MODEL_ID=Qwen/Qwen3-8B
+RUN python - <<'PY'\nfrom transformers import AutoTokenizer, AutoModelForCausalLM; m=\"${MODEL_ID}\"; AutoTokenizer.from_pretrained(m, trust_remote_code=True); AutoModelForCausalLM.from_pretrained(m, trust_remote_code=True)\nPY
+
 # Start the worker
 CMD ["python", "-u", "/app/handler.py"]
