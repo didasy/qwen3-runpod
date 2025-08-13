@@ -13,6 +13,9 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, StoppingCriteria, 
 MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen3-8B")
 HF_TOKEN = os.getenv("HF_TOKEN")  # set as a Secret in RunPod if needed
 
+DISABLE_THINKING_DEFAULT = (os.getenv("DISABLE_THINKING", "true").lower() == "true")
+FAST_TRANSLATION_DEFAULT = (os.getenv("FAST_TRANSLATION", "true").lower() == "true")
+
 # dtype heuristic
 DTYPE = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) \
     else (torch.float16 if torch.cuda.is_available() else torch.float32)
@@ -43,6 +46,18 @@ def _gpu_diag():
         print("[gpu-diag] error:", e, flush=True)
 
 _gpu_diag()
+
+def build_bad_words_ids(tok, tags):
+    # converts strings to token-id sequences for bad_words_ids
+    seqs = []
+    for t in tags:
+        ids = tok.encode(t, add_special_tokens=False)
+        if ids:
+            seqs.append(ids)
+    return seqs
+
+THINK_TAGS = ["<think>", "</think>", "<|think|>", "<|assistant_thought|>", "<|end_assistant_thought|>"]
+BAD_WORDS_IDS_THINK = build_bad_words_ids(tokenizer, THINK_TAGS)
 
 # ----------------------------
 # Load model once per pod
@@ -200,22 +215,63 @@ def generate_text(inp: Dict[str, Any]) -> Dict[str, Any]:
     if torch.cuda.is_available():
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
-    # Generate
+    # --- Fast translation preset (optional) ---
+    # Users can pass input["task"] = "translate" to force this path,
+    # or set FAST_TRANSLATION=true in env to apply when prompt starts with "Translate".
+    task = (inp.get("task") or "").lower()
+    is_translate = task == "translate" or (
+        FAST_TRANSLATION_DEFAULT and isinstance(prompt, str) and prompt.strip().lower().startswith("translate")
+    )
+
+    # Sampling params
+    max_new_tokens = int(inp.get("max_new_tokens") or inp.get("max_tokens") or (128 if is_translate else 512))
+    max_new_tokens = max(1, min(max_new_tokens, 2048 if is_translate else 4096))
+
+    temperature = clamp(inp.get("temperature", (0.0 if is_translate else 0.7)), 0.0, 2.0, 0.7)
+    top_p = clamp(inp.get("top_p", (1.0 if is_translate else 0.9)), 0.0, 1.0, 0.9)
+    top_k = int(inp.get("top_k", (0 if is_translate else 50)))
+    repetition_penalty = clamp(inp.get("repetition_penalty", 1.0), 0.8, 2.0, 1.0)
+
+    # Thinking control
+    disable_thinking = bool(inp.get("disable_thinking", DISABLE_THINKING_DEFAULT))
+    # Combine caller-provided bad words with think-tag bans
+    user_bad_words = inp.get("bad_words", []) or []
+    user_bad_words_ids = build_bad_words_ids(tokenizer, user_bad_words) if user_bad_words else []
+    bad_words_ids = (BAD_WORDS_IDS_THINK + user_bad_words_ids) if disable_thinking else (user_bad_words_ids or None)
+
+    # Stops
+    stop = inp.get("stop", None)
+    stopping_criteria = StoppingCriteriaList()
+    if isinstance(stop, list) and stop:
+        stopping_criteria.append(StringListStops(stop, tokenizer))
+    if disable_thinking and not stop:
+        # add a default set to terminate early if any slips through
+        stopping_criteria.append(StringListStops(THINK_TAGS, tokenizer))
+
+    # Tokenize
+    inputs = tokenizer(rendered, return_tensors="pt", add_special_tokens=True)
+    if torch.cuda.is_available():
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+    # Generate (greedy for translate, sampled otherwise)
     t0 = time.time()
     with torch.no_grad():
         output_ids = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
-            do_sample=(temperature > 0),
+            do_sample=(temperature > 0 and not is_translate),
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
             repetition_penalty=repetition_penalty,
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
+            use_cache=True,
+            bad_words_ids=bad_words_ids,
             stopping_criteria=stopping_criteria
         )
     elapsed = round(time.time() - t0, 3)
+
 
     # Decode
     full_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
